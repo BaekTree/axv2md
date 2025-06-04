@@ -1,10 +1,10 @@
 import os
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
-MAIN_TEX = "main.tex"
+MARKDOWN_DIR = "markdown"
+FLATTEN_TEX_DIR = "flattened"
 
 
 def detect_main_tex(directory="."):
@@ -110,13 +110,6 @@ def engrave_section_tag(tex_document):
     return re.sub(r"(\\section\{)", r"#<SECTIONMARK>#\1", tex_document)
 
 
-def tex_preprocess_for_markdown_conversion(tex_document):
-    # pandoc cannot work with documentclass
-    if tex_document.startswith("\\documentclass"):
-        return "\n".join(tex_document.split("\n")[1:])
-    return tex_document
-
-
 def remove_figures(tex_content):
     # Remove all content within \begin{figure} ... \end{figure}
     return re.sub(r"\\begin{figure}.*?\\end{figure}", "", tex_content, flags=re.DOTALL)
@@ -126,6 +119,27 @@ def remove_comments(tex_content):
     return "\n".join(
         [line for line in tex_content.split("\n") if not line.startswith("%")]
     )
+
+
+def convert_2_markdown(flat_file, file_name):
+    os.makedirs(MARKDOWN_DIR, exist_ok=True)
+    markdown_file_name = os.path.join(MARKDOWN_DIR, file_name)
+
+    convert_to_markdown(flat_file, markdown_file_name)
+    # print("✅ Conversion complete: `output.md`")
+
+    ############ Misc postprocess ############
+    with open(markdown_file_name, "r", encoding="utf-8") as f:
+        markdown_file = f.read()
+    markdown_file = re.sub(r"\*\$\$", "$$", markdown_file)
+    markdown_file = re.sub(r"\$\$\*", "$$", markdown_file)
+    markdown_file = re.sub(r"\\vvvert", r"\\|", markdown_file)
+    markdown_file = re.sub("◻", "\n$" + r"\\boxed" + "{}$", markdown_file)
+    markdown_file = markdown_file.replace("$$", "\n$$\n")
+    # markdown_file = re.sub("$$", "\n$$\n", markdown_file)
+
+    with open(markdown_file_name, "w", encoding="utf-8") as f:
+        f.write(markdown_file)
 
 
 def main(arxiv_id):
@@ -141,15 +155,12 @@ def main(arxiv_id):
     ############ LaTex -> KaTeX/MathJax ############
     # \label{subs:estimate semigroup}
     # \ref{subs:estimate semigroup}
-
     main_tex = re.sub(r"\\mathds", r"\\mathbb", main_tex)
     main_tex = re.sub(r"\\label\{(.+?)\}", "", main_tex)
     main_tex = re.sub(r"\\ref\{(.+?)\}", "", main_tex)
 
-    # TODO:
+    # TODO: restore figure
     main_tex = remove_figures(main_tex)
-
-    # main_tex = tex_preprocess_for_markdown_conversion(main_tex)
 
     ############ macro workaround ############
     # macros = extract_macros(raw_tex_lines)
@@ -162,59 +173,47 @@ def main(arxiv_id):
     # with open(flat_file, "w", encoding="utf-8") as f:
     #     f.writelines(expanded_tex)
 
-    FLATTEN_TEX_DIR = "flattened"
-    os.makedirs(FLATTEN_TEX_DIR, exist_ok=True)
-    flat_file = os.path.join(FLATTEN_TEX_DIR, f"flattened_main_{arxiv_id}.tex")
-    with open(flat_file, "w", encoding="utf-8") as f:
-        f.writelines(main_tex)
+    ############ image workaround ############
+    # image_paths = collect_images(main_tex)
+    # os.makedirs("images", exist_ok=True)
+    # for img in image_paths:
+    #     for ext in [".png", ".jpg", ".jpeg", ".pdf"]:
+    #         src = Path(img + ext)
+    #         if src.exists():
+    #             shutil.copy(src, Path("images") / src.name)
+    #             break
 
-    image_paths = collect_images(main_tex)
-    os.makedirs("images", exist_ok=True)
-    for img in image_paths:
-        for ext in [".png", ".jpg", ".jpeg", ".pdf"]:
-            src = Path(img + ext)
-            if src.exists():
-                shutil.copy(src, Path("images") / src.name)
-                break
+    
 
-    MARKDOWN_DIR = "markdown"
-    os.makedirs(MARKDOWN_DIR, exist_ok=True)
-    markdown_file_name = os.path.join(MARKDOWN_DIR, f"output_{arxiv_id}.md")
+    ############ section split with section mark and pandoc ############
+    # sections = main_tex.split("#<SECTIONMARK>#")[1:]
+    # sections[-1] = sections[-1].replace("\end{document}", "")
 
-    convert_to_markdown(flat_file, markdown_file_name)
-    # print("✅ Conversion complete: `output.md`")
 
-    with open(markdown_file_name, "r", encoding="utf-8") as f:
-        markdown_file = f.read()
+    ############ section split with algotithm and pandoc ############
+    from lab_begin_level_func import begin_end_searach
+    sections = begin_end_searach(main_tex)    
 
-    ############ Misc postprocess ############
-    markdown_file = re.sub(r"\*\$\$", "$$", markdown_file)
-    markdown_file = re.sub(r"\$\$\*", "$$", markdown_file)
-    markdown_file = re.sub(r"\\vvvert", r"\\|", markdown_file)
-    markdown_file = re.sub("◻", "\n$" + r"\\boxed" + "{}$", markdown_file)
-    markdown_file = re.sub("$$", "\n$$\n", markdown_file)
+    for s_i, section in enumerate(sections):
+        os.makedirs(FLATTEN_TEX_DIR, exist_ok=True)
+        section_file = os.path.join(
+            FLATTEN_TEX_DIR, f"flattened_main_{arxiv_id}_{s_i}.tex"
+        )
+        with open(section_file, "w", encoding="utf-8") as f:
+            f.writelines(section)
 
-    with open(markdown_file_name, "w", encoding="utf-8") as f:
-        f.write(markdown_file)
+        convert_2_markdown(section_file, f"output_{arxiv_id}_{s_i}.md")
+
+
 
 
 if __name__ == "__main__":
-    # arxiv_id = "2503.13551"   # clear
-    # arxiv_id = "2406.11944"
-    # main(arxiv_id)
     papers_dir = "paper_sources"
     for arxiv_id in os.listdir(papers_dir):
         if re.search(r"^\d\d\d\d\.\d\d\d\d\d$", arxiv_id) is None:
             continue
         try:
             main(arxiv_id)
-        # time.sleep(5)
         except Exception:
             pass
 
-    #     #     import pdb
-    #     #     from pprint import pprint
-    #     #     def cls():
-    #     #         print("\n"*100)
-    #     #     print(e)
-    #     #     pdb.set_trace()
