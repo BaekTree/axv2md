@@ -78,28 +78,20 @@ def parallel_arxiv_fetch(to_go_id_list, num_threads=4):
 
 if __name__ == "__main__":
     # 1000개 id list 저장
-    # id_list = search_batch_arxiv_id("LLM")
+    id_list = search_batch_arxiv_id("LLM")
 
-    # with open("id_list.json", 'w', encoding='utf-8') as f:
-    #     json.dump(id_list, f, indent=4, ensure_ascii=False)
+    with open("id_list.json", "w", encoding="utf-8") as f:
+        json.dump(id_list, f, indent=4, ensure_ascii=False)
 
+    # retry if needed
     # 1000개 id list load
     with open("id_list.json", "r", encoding="utf-8") as f:
         id_list = json.load(f)
-
     already_paper_id_list = set(os.listdir("paper_sources"))
     to_go_id_list = set(id_list) - already_paper_id_list
 
     parallel_arxiv_fetch(to_go_id_list, num_threads=5)
 
-    # for arxiv_id in tqdm(to_go_id_list, total = len(to_go_id_list)):
-    #     try:
-    #         fetch_arxiv_tex(arxiv_id)
-    #     except:
-    #         pass
-    # time.sleep(5)
-    # rate limit에 따르면 3초에 request 1개이다. 그런데 다운로드 받아서 압축 풀고 하는데 약 10~15초 걸리는 듯.
-    # IO가 있으니 병렬화?
-
-    # # arxiv_id = "2505.06120"
-    # # fetch_arxiv_tex(arxiv_id)
+    # each arxiv id fetch data
+    # arxiv_id = "2506.02089v1"
+    # fetch_arxiv_tex(arxiv_id)
