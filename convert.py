@@ -326,7 +326,7 @@ def prep_tex(arxiv_id: str, verbose: bool = False):
     cleanse_tex = re.sub(r"\\mathds", r"\\mathbb", macro_tex)
     cleanse_tex = re.sub(r"\\label\{(.+?)\}", "", cleanse_tex)
     cleanse_tex = re.sub(r"\\ref\{(.+?)\}", "", cleanse_tex)
-    cleanse_tex = re.sub(r"\n+\}", "\n}", macro_tex)
+    cleanse_tex = re.sub(r"\n+\}", "\n}", cleanse_tex)
 
     # TODO: restore figure to convert
     cleanse_tex = remove_figures(cleanse_tex)
@@ -355,7 +355,7 @@ def prep_tex(arxiv_id: str, verbose: bool = False):
 
 
 if __name__ == "__main__":
-    arxiv_id = "2505.24341v1"
+    arxiv_id = "2411.09629"
     main_tex = prep_tex(arxiv_id)
     sections = search_section_by_between_begin_end(main_tex)
     save_tex_sections(arxiv_id, sections)
