@@ -4,19 +4,10 @@ import subprocess
 from pathlib import Path
 from typing import List
 
-from tqdm import tqdm
-
-# MARKDOWN_DIR = "markdown"
-MARKDOWN_DIR = "./"
-# FLATTEN_TEX_DIR = "flattened"
-FLATTEN_TEX_DIR = "./"
-# SECTIONS_DIR = "sections"
-SECTIONS_DIR = "./"
+MARKDOWN_DIR = "markdown"
+FLATTEN_TEX_DIR = "flattened"
+SECTIONS_DIR = "sections"
 PAPER_DIRS = "paper_sources"
-
-
-class SecionCountMissException(Exception):
-    pass
 
 
 def search_section_by_between_begin_end(tex_doc):
@@ -92,13 +83,35 @@ def search_table_begin_end(tex_doc):
         elif "end" in found.group():
             begin = stack.pop()
 
-            # table 안에 tabular nested 될 수 있음. 
+            # table 안에 tabular nested 될 수 있음.
             # 가장 바깥 table에서만 지운다.
             if not stack:
                 end = found
-                before_string = tex_doc[before_index:begin.start()]
+                before_string = tex_doc[before_index : begin.start()]
                 new_tex_doc += before_string
-                
+
+                before_index = end.end() + 1
+    new_tex_doc += tex_doc[before_index:]
+    return new_tex_doc
+
+
+def search_itemize_begin_end(tex_doc):
+    stack = []
+    before_index = 0
+    new_tex_doc = ""
+    for found in re.finditer(r"\\begin{itemize.*?}|\\end{itemize.*?}", tex_doc):
+        if "begin" in found.group():
+            stack.append(found)
+        elif "end" in found.group():
+            begin = stack.pop()
+
+            # itemize 안에 itemize에서만 nested 될 수 있음.
+            # 가장 바깥 itemize에서만 지운다.
+            if not stack:
+                end = found
+                before_string = tex_doc[before_index : begin.start()]
+                new_tex_doc += before_string
+
                 before_index = end.end() + 1
     new_tex_doc += tex_doc[before_index:]
     return new_tex_doc
@@ -130,12 +143,12 @@ def detect_main_tex(directory: str = "."):
 
 def flatten_tex(file_path: str, visited: bool = None) -> List[str]:
     visited = visited or set()
-    output = []
+    # new flatten starts with newline. comments may corrupts without newlines
+    output = ["\n"]
 
     if file_path in visited:
         return []
     visited.add(file_path)
-
     with open(file_path, "r", encoding="utf-8") as f:
         for line in f:
             match = re.search(r"\\(input|include)\{(.+?)\}", line)
@@ -221,11 +234,18 @@ def convert_to_markdown(tex_file: str, md_file: str):
 def remove_figures(tex_content: str) -> str:
     # Remove all content within \begin{figure} ... \end{figure}
     # figure 뒤에 별 있을 수 있음.
-    return re.sub(r"\\begin{figure.*?\\end{figure\*?}", "", tex_content, flags=re.DOTALL)
+    return re.sub(
+        r"\\begin{figure.*?\\end{figure\*?}", "", tex_content, flags=re.DOTALL
+    )
 
 
 def remove_comments(tex_lines: List[str]) -> str:
-    return [re.sub(r"(?<!\\)%.*", "", line) for line in tex_lines]
+    return [
+        re.sub(r"(?<!\\)%.*", "", line).strip()
+        if re.search(r"(?<!\\)%.*", line)
+        else line
+        for line in tex_lines
+    ]
 
 
 def convert_2_markdown(arxiv_id, flat_file: str, file_name: str) -> None:
@@ -234,7 +254,6 @@ def convert_2_markdown(arxiv_id, flat_file: str, file_name: str) -> None:
     markdown_file_name = os.path.join(arxiv_md_path, file_name)
 
     convert_to_markdown(flat_file, markdown_file_name)
-    # print("Conversion complete: `output.md`")
 
     ############ Misc postprocess ############
     with open(markdown_file_name, "r", encoding="utf-8") as f:
@@ -251,14 +270,8 @@ def convert_2_markdown(arxiv_id, flat_file: str, file_name: str) -> None:
 
 def save_tex_sections(arxiv_id: str, sections: List[str]):
     for s_i, section in enumerate(sections):
-
         sections_arxiv_path = os.path.join(SECTIONS_DIR, arxiv_id)
         save_tex(section, sections_arxiv_path, f"section_{s_i}.tex")
-
-        # os.makedirs(sections_arxiv_path, exist_ok=True)
-        # section_file_path = os.path.join(sections_arxiv_path, f"section_{s_i}.tex")
-        # with open(section_file_path, "w", encoding="utf-8") as f:
-        #     f.writelines(section)
 
 
 def convert_sections(arxiv_id: str):
@@ -270,30 +283,33 @@ def convert_sections(arxiv_id: str):
             f"output_{arxiv_id}_{s_i}.md",
         )
 
-def save_tex(tex_doc: str, file_path:str, file_name:str):
+
+def convert_tex(arxiv_id):
+    """"""
+    flat_arxiv_path = os.path.join(FLATTEN_TEX_DIR, arxiv_id)
+    convert_2_markdown(
+        arxiv_id,
+        os.path.join(flat_arxiv_path, "cleanse_tex.tex"),
+        f"output_{arxiv_id}_cleanse.md",
+    )
+
+
+def save_tex(tex_doc: str, file_path: str, file_name: str):
     os.makedirs(file_path, exist_ok=True)
-    with open(
-        os.path.join(file_path, file_name), "w", encoding="utf-8"
-    ) as f:
-        f.write("".join(tex_doc))    
+    with open(os.path.join(file_path, file_name), "w", encoding="utf-8") as f:
+        f.write("".join(tex_doc))
+
 
 def prep_tex(arxiv_id: str, verbose: bool = False):
     main_tex = detect_main_tex(directory=f"{PAPER_DIRS}/{arxiv_id}/latex")
     if verbose:
         print(f"📄 Detected main TeX file: {main_tex}")
     raw_tex_lines = flatten_tex(main_tex)
-    
-    flatten_arxiv_path = os.path.join(FLATTEN_TEX_DIR, arxiv_id)
-    save_tex("".join(raw_tex_lines), flatten_arxiv_path, "flatten_tex.tex")
-
-
-    # os.makedirs(flatten_arxiv_path, exist_ok=True)
-    # with open(
-    #     os.path.join(flatten_arxiv_path, "flatten_tex.tex"), "w", encoding="utf-8"
-    # ) as f:
-    #     f.write("".join(raw_tex_lines))
 
     raw_tex_lines = remove_comments(raw_tex_lines)
+
+    flatten_arxiv_path = os.path.join(FLATTEN_TEX_DIR, arxiv_id)
+    save_tex("".join(raw_tex_lines), flatten_arxiv_path, "flatten_tex.tex")
 
     ############ macro workaround ############
     macros = extract_macros(raw_tex_lines)
@@ -307,16 +323,16 @@ def prep_tex(arxiv_id: str, verbose: bool = False):
     ############ LaTex -> KaTeX/MathJax ############
     # \label{subs:estimate semigroup}
     # \ref{subs:estimate semigroup}
-    main_tex = re.sub(r"\\mathds", r"\\mathbb", macro_tex)
-    main_tex = re.sub(r"\\label\{(.+?)\}", "", main_tex)
-    main_tex = re.sub(r"\\ref\{(.+?)\}", "", main_tex)
-    main_tex = re.sub(r"\n+\}", "\n}", main_tex)
+    cleanse_tex = re.sub(r"\\mathds", r"\\mathbb", macro_tex)
+    cleanse_tex = re.sub(r"\\label\{(.+?)\}", "", cleanse_tex)
+    cleanse_tex = re.sub(r"\\ref\{(.+?)\}", "", cleanse_tex)
+    cleanse_tex = re.sub(r"\n+\}", "\n}", macro_tex)
 
     # TODO: restore figure to convert
-    main_tex = remove_figures(main_tex)
+    cleanse_tex = remove_figures(cleanse_tex)
 
     ############ image workaround ############
-    # image_paths = collect_images(main_tex)
+    # image_paths = collect_images(cleanse_tex)
     # os.makedirs("images", exist_ok=True)
     # for img in image_paths:
     #     for ext in [".png", ".jpg", ".jpeg", ".pdf"]:
@@ -325,106 +341,22 @@ def prep_tex(arxiv_id: str, verbose: bool = False):
     #             shutil.copy(src, Path("images") / src.name)
     #             break
 
-    main_tex = search_table_begin_end(main_tex)
-    save_tex(main_tex, flatten_arxiv_path, "main_tex.tex")
-    return main_tex
+    # TODO restore table
+    cleanse_tex = search_table_begin_end(cleanse_tex)
+    # TODO itemize table
+    cleanse_tex = search_itemize_begin_end(cleanse_tex)
 
+    # # final post process
+    # # last line must be end document. no additional cahr or new line is valid.
+    # cleanse_tex = cleanse_tex.strip()
 
-def evaluate_algorithm(main_tex, sections):
-    # 개수 검증
-    # for section in sections:
-    #     print(section[:100])
-    # print(re.findall(r"\\section{.+?\n", main_tex))
-    compare_result = len(sections) == len(re.findall(r"\\section{", main_tex))
-    # print(f"{compare_result}: {arxiv_id}")
-
-    return compare_result
-
-
-def main(arxiv_id: str):
-    main_tex = prep_tex(arxiv_id)
-    sections = search_section_by_between_begin_end(main_tex)
-    save_tex_sections(arxiv_id, sections)
-    if not evaluate_algorithm(main_tex, sections):
-        print(arxiv_id)
-        raise SecionCountMissException()
-    
-    return sections
-    # convert_sections(arxiv_id)
+    save_tex(cleanse_tex, flatten_arxiv_path, "cleanse_tex.tex")
+    return cleanse_tex
 
 
 if __name__ == "__main__":
-    # file_error_count = 0
-    # tex_split_error_count = 0
-    # section_count_diff_count = 0
-
-    # md_conversion_error_count = 0
-
-    # ## 전체 파일에 대하여
-    # for arxiv_id in tqdm(os.listdir(PAPER_DIRS), total=len(os.listdir(PAPER_DIRS))):
-    #     if re.search(r"^\d\d\d\d\.\d\d\d\d\d(v\d+)?$", arxiv_id) is None:
-    #         continue
-    #     try:
-    #         sections = main(arxiv_id)
-
-    #     except FileNotFoundError:
-    #         file_error_count += 1
-    #         continue
-    #     except SecionCountMissException:
-    #         section_count_diff_count += 1
-    #         continue
-    #     except Exception:
-    #         tex_split_error_count += 1
-    #         continue
-
-        # try:
-        #     convert_sections(arxiv_id)
-        # except:
-        #     md_conversion_error_count += 1
-        #     continue
-
-        # sections_arxiv_path = os.path.join(SECTIONS_DIR, arxiv_id)
-        # md_files = os.listdir(sections_arxiv_path)
-
-        # if len(md_files) != len(sections):
-        #     md_conversion_error_count += 1
-
-    # print(f"total papers: {len(os.listdir(PAPER_DIRS))}")
-    # print(f"file_error_count: {file_error_count}")
-    # print(f"tex_split_error_count: {tex_split_error_count}")
-    # print(f"section_count_diff_count: {section_count_diff_count}")
-    # print(f"md_conversion_error_count: {md_conversion_error_count}")
-
-    # 개별 파일 테스느
-    # arxiv_id = "2411.09629"
-
-    # 250610
-    # pass. also calibrate the main tex. there is some sample texes which has documentclass,includes, begin document etc...
-    # arxiv_id = "2506.01604v1"
-
-    # TODO "2505.24838v1"
-    # arxiv_id = "2505.23249v1"
-    arxiv_id = "2505.24838v1"
-    # arxiv_id ="2505.22148v1"
-    main(arxiv_id)
-    # convert_sections(arxiv_id)
-
-
-    """
-    # 전체 paper tex 파일이 없는경우? 일부만 있는 경우?
-    2505.22148v1
-    2505.22029v1
-    2505.22375v2
-    2506.01344v1
-    2506.02847v1
-    2505.21997v1
-    2505.23854v1
-    2506.01147v1
-    2505.23944v1
-    2506.03106v1
-    2506.02929v1
-    2505.22192v1
-    2505.23091v1
-    2505.24625v1
-    2505.21981v1
-    """
+    arxiv_id = "2505.24341v1"
+    main_tex = prep_tex(arxiv_id)
+    sections = search_section_by_between_begin_end(main_tex)
+    save_tex_sections(arxiv_id, sections)
+    convert_tex(arxiv_id)
